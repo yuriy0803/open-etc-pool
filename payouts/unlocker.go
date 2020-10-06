@@ -31,6 +31,14 @@ type UnlockerConfig struct {
 const minDepth = 16
 const byzantiumHardForkHeight = 4370000
 
+const ecip1017FBlock = 0                    // mordor
+var ecip1017EraRounds = big.NewInt(2000000) // mordor
+// const ecip1017FBlock = 5000000    // mainnet
+// const ecip1017EraRounds = 5000000 // mainnet
+var disinflationRateQuotient = big.NewInt(4) // Disinflation rate quotient for ECIP1017
+var disinflationRateDivisor = big.NewInt(5)  // Disinflation rate divisor for ECIP1017
+var big32 = big.NewInt(32)
+
 var homesteadReward = math.MustParseBig256("5000000000000000000")
 var byzantiumReward = math.MustParseBig256("3000000000000000000")
 
@@ -501,11 +509,74 @@ func weiToShannonInt64(wei *big.Rat) int64 {
 	return value
 }
 
-func getConstReward(height int64) *big.Int {
-	if height >= byzantiumHardForkHeight {
-		return new(big.Int).Set(byzantiumReward)
+// GetRewardByEra gets a block reward at disinflation rate.
+// Constants MaxBlockReward, DisinflationRateQuotient, and DisinflationRateDivisor assumed.
+func GetBlockWinnerRewardByEra(era *big.Int, blockReward *big.Int) *big.Int {
+	if era.Cmp(big.NewInt(0)) == 0 {
+		return new(big.Int).Set(blockReward)
 	}
-	return new(big.Int).Set(homesteadReward)
+
+	// MaxBlockReward _r_ * (4/5)**era == MaxBlockReward * (4**era) / (5**era)
+	// since (q/d)**n == q**n / d**n
+	// qed
+	var q, d, r *big.Int = new(big.Int), new(big.Int), new(big.Int)
+
+	q.Exp(disinflationRateQuotient, era, nil)
+	d.Exp(disinflationRateDivisor, era, nil)
+
+	r.Mul(blockReward, q)
+	r.Div(r, d)
+
+	return r
+}
+
+/*
+// As of "Era 2" (zero-index era 1), uncle miners and winners are rewarded equally for each included block.
+// So they share this function.
+func getEraUncleBlockReward(era *big.Int, blockReward *big.Int) *big.Int {
+	return new(big.Int).Div(GetBlockWinnerRewardByEra(era, blockReward), big32)
+}
+
+// GetBlockWinnerRewardForUnclesByEra gets called _per winner_, and accumulates rewards for each included uncle.
+// Assumes uncles have been validated and limited (@ func (v *BlockValidator) VerifyUncles).
+func GetBlockWinnerRewardForUnclesByEra(era *big.Int, uncles []*types.Header, blockReward *big.Int) *big.Int {
+	r := big.NewInt(0)
+
+	for range uncles {
+		r.Add(r, getEraUncleBlockReward(era, blockReward)) // can reuse this, since 1/32 for winner's uncles remain unchanged from "Era 1"
+	}
+	return r
+}
+*/
+
+// GetBlockEra gets which "Era" a given block is within, given an era length (ecip-1017 has era=5,000,000 blocks)
+// Returns a zero-index era number, so "Era 1": 0, "Era 2": 1, "Era 3": 2 ...
+func GetBlockEra(blockNum, eraLength *big.Int) *big.Int {
+	// If genesis block or impossible negative-numbered block, return zero-val.
+	if blockNum.Sign() < 1 {
+		return new(big.Int)
+	}
+
+	remainder := big.NewInt(0).Mod(big.NewInt(0).Sub(blockNum, big.NewInt(1)), eraLength)
+	base := big.NewInt(0).Sub(blockNum, remainder)
+
+	d := big.NewInt(0).Div(base, eraLength)
+	dremainder := big.NewInt(0).Mod(d, big.NewInt(1))
+
+	return new(big.Int).Sub(d, dremainder)
+}
+
+func getConstReward(height int64) *big.Int {
+	var blockReward = homesteadReward
+	var bigHeight = new(big.Int).SetInt64(height)
+
+	// Ensure value 'era' is configured.
+	eraLen := ecip1017EraRounds
+	era := GetBlockEra(bigHeight, eraLen)
+	wr := GetBlockWinnerRewardByEra(era, blockReward)
+	// wurs := GetBlockWinnerRewardForUnclesByEra(era, uncles, blockReward) // wurs "winner uncle rewards"
+	// wr.Add(wr, wurs)
+	return wr
 }
 
 func getRewardForUncle(height int64) *big.Int {
