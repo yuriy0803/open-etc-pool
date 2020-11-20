@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ubiq/go-ubiq/common"
+	"github.com/ubiq/go-ubiq/common/hexutil"
 	"github.com/ubiq/go-ubiq/common/math"
 )
 
@@ -35,12 +35,15 @@ func MakeTimestamp() int64 {
 func GetTargetHex(diff int64) string {
 	difficulty := big.NewInt(diff)
 	diff1 := new(big.Int).Div(pow256, difficulty)
-	return string(common.ToHex(diff1.Bytes()))
+	return hexutil.Encode(diff1.Bytes())
 }
 
-func TargetHexToDiff(targetHex string) *big.Int {
-	targetBytes := common.FromHex(targetHex)
-	return new(big.Int).Div(pow256, new(big.Int).SetBytes(targetBytes))
+func TargetHexToDiff(targetHex string) (*big.Int, error) {
+	targetBytes, err := hexutil.Decode(targetHex)
+	if err != nil {
+		return new(big.Int), err
+	}
+	return new(big.Int).Div(pow256, new(big.Int).SetBytes(targetBytes)), nil
 }
 
 func ToHex(n int64) string {

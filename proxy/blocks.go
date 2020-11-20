@@ -75,9 +75,15 @@ func (s *ProxyServer) fetchBlockTemplate() {
 		GetPendingBlockCache: pendingReply,
 		headers:              make(map[string]heightDiffPair),
 	}
+
+	parsedDiff, err := util.TargetHexToDiff(reply[2])
+	if err != nil {
+		log.Printf("Error while parsing diff: %s", err)
+		return
+	}
 	// Copy job backlog and add current one
 	newTemplate.headers[reply[0]] = heightDiffPair{
-		diff:   util.TargetHexToDiff(reply[2]),
+		diff:   parsedDiff,
 		height: height,
 	}
 	if t != nil {
