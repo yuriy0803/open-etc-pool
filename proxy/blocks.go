@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ubiq/go-ubiq/common"
+	"github.com/ubiq/go-ubiq/v5/common"
 
 	"github.com/ubiq/open-ethereum-pool/rpc"
 	"github.com/ubiq/open-ethereum-pool/util"

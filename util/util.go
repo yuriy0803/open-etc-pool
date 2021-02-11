@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ubiq/go-ubiq/common/hexutil"
-	"github.com/ubiq/go-ubiq/common/math"
+	"github.com/ubiq/go-ubiq/v5/common/hexutil"
+	"github.com/ubiq/go-ubiq/v5/common/math"
 )
 
 var Ether = math.BigPow(10, 18)

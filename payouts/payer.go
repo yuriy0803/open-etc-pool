@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ubiq/go-ubiq/common/hexutil"
+	"github.com/ubiq/go-ubiq/v5/common/hexutil"
 
 	"github.com/ubiq/open-ethereum-pool/rpc"
 	"github.com/ubiq/open-ethereum-pool/storage"

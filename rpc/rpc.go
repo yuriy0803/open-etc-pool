@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ubiq/go-ubiq/common/hexutil"
+	"github.com/ubiq/go-ubiq/v5/common/hexutil"
 
 	"github.com/ubiq/open-ethereum-pool/util"
 )
