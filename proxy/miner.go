@@ -18,9 +18,9 @@ var hasher *etchash.Etchash = nil
 func (s *ProxyServer) processShare(login, id, ip string, t *BlockTemplate, params []string) (bool, bool) {
 	if hasher == nil {
 		if s.config.Network == "classic" {
-			hasher = etchash.New(&ecip1099FBlockClassic)
+			hasher = etchash.New(&ecip1099FBlockClassic, nil)
 		} else if s.config.Network == "mordor" {
-			hasher = etchash.New(&ecip1099FBlockMordor)
+			hasher = etchash.New(&ecip1099FBlockMordor, nil)
 		} else {
 			// unknown network
 			log.Printf("Unknown network configuration %s", s.config.Network)
