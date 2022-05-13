@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"time"
-
+//	"github.com/sammy007/open-ethereum-pool/rpc"
 	"github.com/sammy007/open-ethereum-pool/util"
 )
 
@@ -234,14 +235,17 @@ func (cs *Session) handleTCPMessage(s *ProxyServer, req *StratumReq) error {
 		switch req.Method {
 		case "mining.noop":
 			return nil
-
+		case "mining.hashrate":
+			return nil
 		case "mining.authorize":
 			var params []string
 			err := json.Unmarshal(req.Params, &params)
+			fmt.Printf("stratum 2 request mining.authorize, miner: %v\n", params[0])
 			if err != nil || len(params) < 1 {
 				return errors.New("invalid params")
 			}
 			splitData := strings.Split(params[0], ".")
+
 			params[0] = splitData[0]
 			_, errReply := s.handleLoginRPC(cs, params, req.Worker)
 			if errReply != nil {
@@ -252,6 +256,14 @@ func (cs *Session) handleTCPMessage(s *ProxyServer, req *StratumReq) error {
 			}
 
 			// send worker
+			// stratum2 wallet should be in format "0x4bc7b9d69d6454c5666ecad87e5699c1ec02d531.testrig"
+                        sz := len(splitData)
+                        if sz != 2 {
+				fmt.Printf("incorrectly defined wallet: %v adding workername as \"missing\"\n", splitData[0])
+				var missingname = "missing"
+				splitData = append(splitData, missingname)
+                        }
+
 			if err := cs.sendStratumResult(req.Id, splitData[1]); err != nil {
 				return err
 			}
@@ -674,7 +686,10 @@ func (cs *Session) sendJob(s *ProxyServer, id json.RawMessage, newjob bool) erro
 				errReply.Message,
 			})
 		}
-
+		//fmt.Printf("----sendjob, values \n\t1:%v\n\t2:%v\n\t3:%v", reply[0], reply[1], reply[2])
+		//height, err := r.GetBlockByHeight(nil)
+		//block, err := rpc.GetBlockByHeight(0)
+		//fmt.Printf("---height is %v\n", block)
 		cs.JobDetails = jobDetails{
 			JobID:      randomHex(8),
 			SeedHash:   reply[1],
