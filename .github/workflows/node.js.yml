@@ -39,4 +39,4 @@ jobs:
         run: npx bower install
 
       - name: Build Ember application
-        run: ./node_modules/.bin/ember build
+        run: npm run build
