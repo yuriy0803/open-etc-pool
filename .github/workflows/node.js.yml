@@ -23,7 +23,7 @@ jobs:
         node-version: ${{ matrix.node-version }}
         registry-url: 'https://registry.npmjs.org/'
         cache: 'npm'
-    - run: npm install -g ember-cli@2.9.1
-    - run: npm install -g bower
-    - run: npm install
-    - run: npx bower install
+    - run: cd www && npm install -g ember-cli@2.9.1
+    - run: cd www && npm install -g bower
+    - run: cd www && npm install
+    - run: cd www && npx bower install
