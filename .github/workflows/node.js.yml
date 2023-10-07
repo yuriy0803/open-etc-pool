@@ -1,34 +1,33 @@
-name: Node.js CI
+name: Ember Application Build and Test
 
 on:
   push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [10.x]
-
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v2
 
       - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
-          node-version: ${{ matrix.node-version }}
-          registry-url: 'https://registry.npmjs.org/'
-          cache: 'npm'
+          node-version: '14'
 
-      - name: Change working directory to www
-        run: cd open-etc-pool/open-etc-pool/www
+      - name: Install npm and bower dependencies
+        run: |
+          cd <repository-directory>  # Replace with the actual repository directory
+          npm install
+          npx bower install --allow-root
 
-      - name: Install Node.js dependencies
-        run: npm install
+      - name: Run Ember server
+        run: |
+          cd <repository-directory>  # Replace with the actual repository directory
+          npx ember server
 
-      - name: Build Ember application
-        run: npm run build
+      - name: Display app URL
+        run: echo "Visit your app at http://localhost:4200."
