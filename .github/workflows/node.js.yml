@@ -2,13 +2,12 @@ name: Node.js CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     strategy:
@@ -16,14 +15,25 @@ jobs:
         node-version: [10.x]
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v2
-      with:
-        node-version: ${{ matrix.node-version }}
-        registry-url: 'https://registry.npmjs.org/'
-        cache: 'npm'
-    - run: cd www && npm install -g ember-cli@2.9.1
-    - run: cd www && npm install -g bower
-    - run: cd www && npm install
-    - run: cd www && npx bower install
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: 'https://registry.npmjs.org/'
+          cache: 'npm'
+
+      - name: Change working directory to www
+        run: cd open-etc-pool/www
+
+      - name: Install global dependencies
+        run: |
+          npm install -g ember-cli@2.9.1
+          npm install -g bower
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Install Bower dependencies
+        run: npx bower install
