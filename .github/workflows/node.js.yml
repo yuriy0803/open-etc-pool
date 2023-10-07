@@ -37,3 +37,6 @@ jobs:
 
       - name: Install Bower dependencies
         run: npx bower install
+
+      - name: Build Ember application
+        run: npx ember build
