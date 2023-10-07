@@ -1,9 +1,9 @@
-name: Ember Application Build and Test
+name: Ember Application Build
 
 on:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   build:
@@ -24,10 +24,10 @@ jobs:
           npm install
           npx bower install --allow-root
 
-      - name: Run Ember server
+      - name: Build Ember application
         run: |
           cd www  # Replace with the actual repository directory where your Ember app is located
-          npx ember server
+          npx ember build
 
-      - name: Display app URL
-        run: echo "Visit your app at http://localhost:4200."
+      - name: Display build completion message
+        run: echo "Ember application build completed successfully."
