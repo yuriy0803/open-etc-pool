@@ -25,7 +25,7 @@ jobs:
           cache: 'npm'
 
       - name: Change working directory to www
-        run: cd open-etc-pool/www
+        run: cd open-etc-pool/open-etc-pool/www
 
       - name: Install Node.js dependencies
         run: npm install
