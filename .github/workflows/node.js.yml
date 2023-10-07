@@ -20,13 +20,13 @@ jobs:
 
       - name: Install npm and bower dependencies
         run: |
-          cd <repository-directory>  # Replace with the actual repository directory
+          cd www  # Replace with the actual repository directory where your Ember app is located
           npm install
           npx bower install --allow-root
 
       - name: Run Ember server
         run: |
-          cd <repository-directory>  # Replace with the actual repository directory
+          cd www  # Replace with the actual repository directory where your Ember app is located
           npx ember server
 
       - name: Display app URL
