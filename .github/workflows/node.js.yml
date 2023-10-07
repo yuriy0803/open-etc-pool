@@ -27,16 +27,8 @@ jobs:
       - name: Change working directory to www
         run: cd open-etc-pool/www
 
-      - name: Install global dependencies
-        run: |
-          npm install -g ember-cli@2.9.1
-          npm install -g bower
-
       - name: Install Node.js dependencies
         run: npm install
-
-      - name: Install Bower dependencies
-        run: npx bower install
 
       - name: Build Ember application
         run: npm run build
