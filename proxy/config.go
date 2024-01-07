@@ -16,11 +16,15 @@ type Config struct {
 
 	Threads int `json:"threads"`
 
+	Network string         `json:"network"`
 	Coin  string         `json:"coin"`
 	Redis storage.Config `json:"redis"`
 
 	BlockUnlocker payouts.UnlockerConfig `json:"unlocker"`
 	Payouts       payouts.PayoutsConfig  `json:"payouts"`
+	
+	AvgBlockTime    float64 `json:"avgBlockTime"`
+	BlockTimeWindow int64   `json:"blockTimeWindow"`
 
 	NewrelicName    string `json:"newrelicName"`
 	NewrelicKey     string `json:"newrelicKey"`
@@ -38,13 +42,19 @@ type Proxy struct {
 	Difficulty           int64  `json:"difficulty"`
 	StateUpdateInterval  string `json:"stateUpdateInterval"`
 	HashrateExpiration   string `json:"hashrateExpiration"`
+	StratumHostname      string `json:"stratumHostname"`
+	Algorithm            string `json:"algorithm"`
+	ForkBlock []ForkBlock `json:"forkBlock"`
+
 
 	Policy policy.Config `json:"policy"`
 
 	MaxFails    int64 `json:"maxFails"`
 	HealthCheck bool  `json:"healthCheck"`
+	Debug       bool  `json:"debug"`
 
 	Stratum Stratum `json:"stratum"`
+	StratumNiceHash StratumNiceHash `json:"stratum_nice_hash"`
 }
 
 type Stratum struct {
@@ -55,6 +65,18 @@ type Stratum struct {
 	TLS      bool   `json:"tls"`
 	CertFile string `json:"certFile"`
 	KeyFile  string `json:"keyFile"`
+}
+
+type StratumNiceHash struct {
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"`
+	Timeout string `json:"timeout"`
+	MaxConn int    `json:"maxConn"`
+}
+
+type ForkBlock struct {
+	Block     uint64 `json:"block"`
+	Algorithm string `json:"algorithm"`
 }
 
 type Upstream struct {

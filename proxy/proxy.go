@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ type ProxyServer struct {
 	upstreams          []*rpc.RPCClient
 	backend            *storage.RedisClient
 	diff               string
+	algorithm          string
 	policy             *policy.PolicyServer
 	hashrateExpiration time.Duration
 	failsCount         int64
@@ -34,6 +36,21 @@ type ProxyServer struct {
 	sessionsMu sync.RWMutex
 	sessions   map[*Session]struct{}
 	timeout    time.Duration
+	// Extranonce
+	Extranonces map[string]bool
+}
+
+type jobDetails struct {
+	JobID      string
+	SeedHash   string
+	HeaderHash string
+	Height     string
+	Epoch      int64
+}
+
+type staleJob struct {
+	SeedHash   string
+	HeaderHash string
 }
 
 type Session struct {
@@ -44,6 +61,16 @@ type Session struct {
 	sync.Mutex
 	conn  net.Conn
 	login string
+	lastErr error
+
+	stratum        int
+	algorithm      string
+	subscriptionID string
+	Extranonce     string
+	ExtranonceSub  bool
+	JobDetails     jobDetails
+	staleJobs      map[string]staleJob
+	staleJobIDs    []string
 }
 
 func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {
@@ -55,6 +82,16 @@ func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {
 	proxy := &ProxyServer{config: cfg, backend: backend, policy: policy}
 	proxy.diff = util.GetTargetHex(cfg.Proxy.Difficulty)
 
+	// set default Algorithm
+	switch cfg.Proxy.Algorithm {
+	case "progpow":
+		proxy.algorithm = "progpow"
+		break
+	default:
+		proxy.algorithm = "ethash"
+		break
+	}
+
 	proxy.upstreams = make([]*rpc.RPCClient, len(cfg.Upstream))
 	for i, v := range cfg.Upstream {
 		proxy.upstreams[i] = rpc.NewRPCClient(v.Name, v.Url, v.Timeout)
@@ -64,6 +101,7 @@ func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {
 
 	if cfg.Proxy.Stratum.Enabled {
 		proxy.sessions = make(map[*Session]struct{})
+		proxy.Extranonces = make(map[string]bool)
 		go proxy.ListenTCP()
 	}
 
@@ -107,7 +145,7 @@ func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {
 			case <-stateUpdateTimer.C:
 				t := proxy.currentBlockTemplate()
 				if t != nil {
-					err := backend.WriteNodeState(cfg.Name, t.Height, t.Difficulty)
+					err := backend.WriteNodeState(cfg.Name, t.Height, t.Difficulty, cfg.AvgBlockTime)
 					if err != nil {
 						log.Printf("Failed to write node state to backend: %v", err)
 						proxy.markSick()
@@ -128,6 +166,7 @@ func (s *ProxyServer) Start() {
 	r := mux.NewRouter()
 	r.Handle("/{login:0x[0-9a-fA-F]{40}}/{id:[0-9a-zA-Z-_]{1,8}}", s)
 	r.Handle("/{login:0x[0-9a-fA-F]{40}}", s)
+	r.HandleFunc("/notify", s.MiningNotify)
 	srv := &http.Server{
 		Addr:           s.config.Proxy.Listen,
 		Handler:        r,
@@ -136,6 +175,76 @@ func (s *ProxyServer) Start() {
 	err := srv.ListenAndServe()
 	if err != nil {
 		log.Fatalf("Failed to start proxy: %v", err)
+	}
+}
+
+func (s *ProxyServer) MiningNotify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "405 method not allowed.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body := make([]byte, r.ContentLength)
+	r.Body.Read(body)
+
+	var reply []string
+	err := json.Unmarshal(body, &reply)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+
+	t := s.currentBlockTemplate()
+	// No need to update, we have fresh job
+	if t != nil {
+		if t.Header == reply[0] {
+			return
+		}
+		if _, ok := t.headers[reply[0]]; ok {
+			return
+		}
+	}
+	diff := util.TargetHexToDiff(reply[2])
+	height, err := strconv.ParseUint(strings.Replace(reply[3], "0x", "", -1), 16, 64)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	pendingReply := &rpc.GetBlockReplyPart{
+		Difficulty: util.ToHex(s.config.Proxy.Difficulty),
+		Number:     reply[3],
+	}
+
+	newTemplate := BlockTemplate{
+		Header:               reply[0],
+		Seed:                 reply[1],
+		Target:               reply[2],
+		Height:               height,
+		Difficulty:           diff,
+		GetPendingBlockCache: pendingReply,
+		headers:              make(map[string]heightDiffPair),
+	}
+	// Copy job backlog and add current one
+	newTemplate.headers[reply[0]] = heightDiffPair{
+		diff:   diff,
+		height: height,
+	}
+	if t != nil {
+		for k, v := range t.headers {
+			if v.height > height-maxBacklog {
+				newTemplate.headers[k] = v
+			}
+		}
+	}
+	s.blockTemplate.Store(&newTemplate)
+
+	log.Printf("New block notified at height %d / %s / %d", height, reply[0][0:10], diff)
+
+	// Stratum
+	if s.config.Proxy.Stratum.Enabled {
+		go s.broadcastNewJobs()
 	}
 }
 
