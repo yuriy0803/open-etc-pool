@@ -210,9 +210,9 @@ func (s *ProxyServer) handleClient(w http.ResponseWriter, r *http.Request, ip st
 	}
 }
 
+// Corrected handleMessage implementation
 func (cs *Session) handleMessage(s *ProxyServer, r *http.Request, req *JSONRpcReq) {
 	if req.Id == nil {
-		log.Printf("Missing RPC id from %s", cs.ip)
 		s.policy.ApplyMalformedPolicy(cs.ip)
 		return
 	}
@@ -221,53 +221,53 @@ func (cs *Session) handleMessage(s *ProxyServer, r *http.Request, req *JSONRpcRe
 	login := strings.ToLower(vars["login"])
 
 	if !util.IsValidHexAddress(login) {
-		errReply := &ErrorReply{Code: -1, Message: "Invalid login"}
-		cs.sendError(req.Id, errReply)
-		return
-	}
-	if !s.policy.ApplyLoginPolicy(login, cs.ip) {
-		errReply := &ErrorReply{Code: -1, Message: "You are blacklisted"}
-		cs.sendError(req.Id, errReply)
+		cs.sendError(req.Id, &ErrorReply{Code: -1, Message: "Invalid login"})
 		return
 	}
 
-	// Handle RPC methods
+	if !s.policy.ApplyLoginPolicy(login, cs.ip) {
+		cs.sendError(req.Id, &ErrorReply{Code: -1, Message: "You are blacklisted"})
+		return
+	}
+
 	switch req.Method {
 	case "eth_getWork":
 		reply, errReply := s.handleGetWorkRPC(cs)
 		if errReply != nil {
 			cs.sendError(req.Id, errReply)
-			break
-		}
-		cs.sendResult(req.Id, &reply)
-	case "eth_submitWork":
-		if req.Params != nil {
-			var params []string
-			err := json.Unmarshal(req.Params, &params)
-			if err != nil {
-				log.Printf("Unable to parse params from %v", cs.ip)
-				s.policy.ApplyMalformedPolicy(cs.ip)
-				break
-			}
-			reply, errReply := s.handleSubmitRPC(cs, login, vars["id"], params)
-			if errReply != nil {
-				cs.sendError(req.Id, errReply)
-				break
-			}
-			cs.sendResult(req.Id, &reply)
 		} else {
-			s.policy.ApplyMalformedPolicy(cs.ip)
-			errReply := &ErrorReply{Code: -1, Message: "Malformed request"}
-			cs.sendError(req.Id, errReply)
+			cs.sendResult(req.Id, reply)
 		}
+
+	case "eth_submitWork":
+		if req.Params == nil {
+			s.policy.ApplyMalformedPolicy(cs.ip)
+			cs.sendError(req.Id, &ErrorReply{Code: -1, Message: "Malformed request"})
+			return
+		}
+
+		var params []string
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			s.policy.ApplyMalformedPolicy(cs.ip)
+			cs.sendError(req.Id, &ErrorReply{Code: -1, Message: "Invalid params"})
+			return
+		}
+
+		reply, errReply := s.handleTCPSubmitRPC(cs, vars["id"], params)
+		if errReply != nil {
+			cs.sendError(req.Id, errReply)
+		} else {
+			cs.sendResult(req.Id, reply)
+		}
+
 	case "eth_getBlockByNumber":
-		reply := s.handleGetBlockByNumberRPC()
-		cs.sendResult(req.Id, reply)
+		cs.sendResult(req.Id, s.handleGetBlockByNumberRPC())
+
 	case "eth_submitHashrate":
 		cs.sendResult(req.Id, true)
+
 	default:
-		errReply := s.handleUnknownRPC(cs, req.Method)
-		cs.sendError(req.Id, errReply)
+		cs.sendError(req.Id, s.handleUnknownRPC(cs, req.Method))
 	}
 }
 
