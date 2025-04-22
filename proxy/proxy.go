@@ -34,17 +34,18 @@ type ProxyServer struct {
 	sessionsMu sync.RWMutex
 	sessions   map[*Session]struct{}
 	timeout    time.Duration
-	Extranonce string
 }
 
 type Session struct {
-	ip  string
-	enc *json.Encoder
-
-	// Stratum
 	sync.Mutex
-	conn  *net.TCPConn
-	login string
+	conn         *net.TCPConn
+	ip           string
+	enc          *json.Encoder
+	login        string
+	worker       string
+	lastActivity time.Time
+	lastPing     time.Time
+	pingTimeout  time.Duration
 }
 
 func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {

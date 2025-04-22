@@ -7,13 +7,16 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/etclabscore/open-etc-pool/util"
 )
 
 const (
-	MaxReqSize = 1024
+	MaxReqSize         = 1024
+	DefaultPingTimeout = 90 * time.Second
+	MaxConcurrentSends = 500
 )
 
 func (s *ProxyServer) ListenTCP() {
@@ -22,24 +25,30 @@ func (s *ProxyServer) ListenTCP() {
 
 	addr, err := net.ResolveTCPAddr("tcp4", s.config.Proxy.Stratum.Listen)
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+		log.Fatalf("Error resolving address: %v", err)
 	}
+
 	server, err := net.ListenTCP("tcp4", addr)
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+		log.Fatalf("Error listening: %v", err)
 	}
 	defer server.Close()
 
 	log.Printf("Stratum listening on %s", s.config.Proxy.Stratum.Listen)
-	var accept = make(chan int, s.config.Proxy.Stratum.MaxConn)
-	n := 0
+
+	var acceptSem = make(chan struct{}, s.config.Proxy.Stratum.MaxConn)
+	go s.sessionCleaner()
 
 	for {
 		conn, err := server.AcceptTCP()
 		if err != nil {
+			log.Printf("Accept error: %v", err)
 			continue
 		}
+
 		conn.SetKeepAlive(true)
+		conn.SetKeepAlivePeriod(30 * time.Second)
+		conn.SetNoDelay(true)
 
 		ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 
@@ -47,26 +56,53 @@ func (s *ProxyServer) ListenTCP() {
 			conn.Close()
 			continue
 		}
-		n += 1
-		cs := &Session{conn: conn, ip: ip}
 
-		accept <- n
-		go func(cs *Session) {
-			err = s.handleTCPClient(cs)
+		acceptSem <- struct{}{}
+		cs := &Session{
+			conn:         conn,
+			ip:           ip,
+			enc:          json.NewEncoder(conn),
+			lastActivity: time.Now(),
+			pingTimeout:  DefaultPingTimeout,
+		}
+
+		go func() {
+			defer func() { <-acceptSem }()
+			err := s.handleTCPClient(cs)
 			if err != nil {
 				s.removeSession(cs)
 				conn.Close()
 			}
-			<-accept
-		}(cs)
+		}()
+	}
+}
+
+func (s *ProxyServer) sessionCleaner() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		s.cleanInactiveSessions()
+	}
+}
+
+func (s *ProxyServer) cleanInactiveSessions() {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+
+	now := time.Now()
+	for cs := range s.sessions {
+		if now.Sub(cs.lastActivity) > cs.pingTimeout {
+			cs.conn.Close()
+			delete(s.sessions, cs)
+		}
 	}
 }
 
 func (s *ProxyServer) handleTCPClient(cs *Session) error {
-	cs.enc = json.NewEncoder(cs.conn)
+	s.registerSession(cs)
 	connbuff := bufio.NewReaderSize(cs.conn, MaxReqSize)
-	s.setDeadline(cs.conn)
+
 	for {
+		s.setDeadline(cs.conn)
 		data, isPrefix, err := connbuff.ReadLine()
 		if isPrefix {
 			log.Printf("Socket flood detected from %s", cs.ip)
@@ -74,7 +110,6 @@ func (s *ProxyServer) handleTCPClient(cs *Session) error {
 			return err
 		} else if err == io.EOF {
 			log.Printf("Client %s disconnected", cs.ip)
-			s.removeSession(cs)
 			break
 		} else if err != nil {
 			log.Printf("Error reading from socket: %v", err)
@@ -82,16 +117,14 @@ func (s *ProxyServer) handleTCPClient(cs *Session) error {
 		}
 
 		if len(data) > 1 {
+			cs.lastActivity = time.Now()
 			var req StratumReq
-			err = json.Unmarshal(data, &req)
-			if err != nil {
+			if err := json.Unmarshal(data, &req); err != nil {
 				s.policy.ApplyMalformedPolicy(cs.ip)
 				log.Printf("Malformed stratum request from %s: %v", cs.ip, err)
 				return err
 			}
-			s.setDeadline(cs.conn)
-			err = cs.handleTCPMessage(s, &req)
-			if err != nil {
+			if err := cs.handleTCPMessage(s, &req); err != nil {
 				return err
 			}
 		}
@@ -100,13 +133,11 @@ func (s *ProxyServer) handleTCPClient(cs *Session) error {
 }
 
 func (cs *Session) handleTCPMessage(s *ProxyServer, req *StratumReq) error {
-	// Handle RPC methods
 	switch req.Method {
 	case "eth_submitLogin":
 		var params []string
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			log.Println("Malformed stratum request params from", cs.ip)
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			log.Println("Malformed login params from", cs.ip)
 			return err
 		}
 		reply, errReply := s.handleLoginRPC(cs, params, req.Worker)
@@ -114,17 +145,18 @@ func (cs *Session) handleTCPMessage(s *ProxyServer, req *StratumReq) error {
 			return cs.sendTCPError(req.Id, errReply)
 		}
 		return cs.sendTCPResult(req.Id, reply)
+
 	case "eth_getWork":
 		reply, errReply := s.handleGetWorkRPC(cs)
 		if errReply != nil {
 			return cs.sendTCPError(req.Id, errReply)
 		}
 		return cs.sendTCPResult(req.Id, &reply)
+
 	case "eth_submitWork":
 		var params []string
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			log.Println("Malformed stratum request params from", cs.ip)
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			log.Println("Malformed work submission from", cs.ip)
 			return err
 		}
 		reply, errReply := s.handleTCPSubmitRPC(cs, req.Worker, params)
@@ -132,8 +164,18 @@ func (cs *Session) handleTCPMessage(s *ProxyServer, req *StratumReq) error {
 			return cs.sendTCPError(req.Id, errReply)
 		}
 		return cs.sendTCPResult(req.Id, &reply)
+
 	case "eth_submitHashrate":
 		return cs.sendTCPResult(req.Id, true)
+
+	case "mining.ping":
+		var params []string
+		if err := json.Unmarshal(req.Params, &params); err != nil || len(params) == 0 {
+			return cs.sendTCPError(req.Id, &ErrorReply{Code: -1, Message: "Invalid ping"})
+		}
+		cs.lastPing = time.Now()
+		return cs.sendTCPResult(req.Id, map[string]string{"pong": params[0]})
+
 	default:
 		errReply := s.handleUnknownRPC(cs, req.Method)
 		return cs.sendTCPError(req.Id, errReply)
@@ -151,7 +193,7 @@ func (cs *Session) sendTCPResult(id json.RawMessage, result interface{}) error {
 func (cs *Session) pushNewJob(result interface{}) error {
 	cs.Lock()
 	defer cs.Unlock()
-	// FIXME: Temporarily add ID for Claymore compliance
+
 	message := JSONPushMessage{Version: "2.0", Result: result, Id: 0}
 	return cs.enc.Encode(&message)
 }
@@ -168,8 +210,12 @@ func (cs *Session) sendTCPError(id json.RawMessage, reply *ErrorReply) error {
 	return errors.New(reply.Message)
 }
 
-func (self *ProxyServer) setDeadline(conn *net.TCPConn) {
-	conn.SetDeadline(time.Now().Add(self.timeout))
+func (s *ProxyServer) setDeadline(conn *net.TCPConn) {
+	timeout := s.timeout
+	if len(s.sessions) > 1000 {
+		timeout = timeout / 2
+	}
+	conn.SetDeadline(time.Now().Add(timeout))
 }
 
 func (s *ProxyServer) registerSession(cs *Session) {
@@ -181,7 +227,9 @@ func (s *ProxyServer) registerSession(cs *Session) {
 func (s *ProxyServer) removeSession(cs *Session) {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
-	delete(s.sessions, cs)
+	if _, ok := s.sessions[cs]; ok {
+		delete(s.sessions, cs)
+	}
 }
 
 func (s *ProxyServer) broadcastNewJobs() {
@@ -192,29 +240,36 @@ func (s *ProxyServer) broadcastNewJobs() {
 	reply := []string{t.Header, t.Seed, s.diff}
 
 	s.sessionsMu.RLock()
-	defer s.sessionsMu.RUnlock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for m := range s.sessions {
+		sessions = append(sessions, m)
+	}
+	s.sessionsMu.RUnlock()
 
-	count := len(s.sessions)
-	log.Printf("Broadcasting new job to %v stratum miners", count)
+	log.Printf("Broadcasting new job to %v stratum miners", len(sessions))
 
 	start := time.Now()
-	bcast := make(chan int, 1024)
-	n := 0
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, MaxConcurrentSends)
 
-	for m, _ := range s.sessions {
-		n++
-		bcast <- n
+	for _, cs := range sessions {
+		wg.Add(1)
+		sem <- struct{}{}
 
 		go func(cs *Session) {
-			err := cs.pushNewJob(&reply)
-			<-bcast
-			if err != nil {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := cs.pushNewJob(&reply); err != nil {
 				log.Printf("Job transmit error to %v@%v: %v", cs.login, cs.ip, err)
 				s.removeSession(cs)
+				cs.conn.Close()
 			} else {
 				s.setDeadline(cs.conn)
 			}
-		}(m)
+		}(cs)
 	}
+
+	wg.Wait()
 	log.Printf("Jobs broadcast finished %s", time.Since(start))
 }
