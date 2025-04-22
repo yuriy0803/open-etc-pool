@@ -37,22 +37,14 @@ type ProxyServer struct {
 	Extranonce string
 }
 
-type jobDetails struct {
-	JobID      string
-	SeedHash   string
-	HeaderHash string
-}
-
 type Session struct {
 	ip  string
 	enc *json.Encoder
 
 	// Stratum
 	sync.Mutex
-	conn           *net.TCPConn
-	login          string
-	subscriptionID string
-	JobDeatils     jobDetails
+	conn  *net.TCPConn
+	login string
 }
 
 func NewProxy(cfg *Config, backend *storage.RedisClient) *ProxyServer {
